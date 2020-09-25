@@ -1,0 +1,150 @@
+{{ if .Values.AppType | eq "Deployment" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app_group: {{ .Values.AppGroup }}
+    app: {{ .Values.AppComponent }}
+    release: {{ .Release.Name }}
+spec:
+  selector:
+    matchLabels:
+      app_group: {{ .Values.AppGroup }}
+      app: {{ .Values.AppComponent }}
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app_group: {{ .Values.AppGroup }}
+        app: {{ .Values.AppComponent }}
+        release: {{ .Release.Name }}
+    spec:
+      {{ if .Values.PrivateRegistry | default true }}  
+      imagePullSecrets:
+      - name: {{ .Release.Name }}-registry
+      {{ end }}
+      {{ if .Values.InitContainer | default false}}
+      initContainers:
+        - name: init-container
+          image: {{ .Values.InitContainer.Image }}
+          command:
+          - /bin/sh
+          - -c
+          - |
+            {{ .Values.InitContainer.Command }}
+          {{ if .Values.InitContainer.Privileged | default false}}
+          securityContext:
+              privileged: true
+          {{ end }}
+      {{ end }}
+      containers:
+      - name: {{ .Values.AppComponent }}
+        image: {{ .Values.AppImage }}
+        imagePullPolicy: {{ .Values.ImagePullPolicy | default "Always" }}
+        {{ if .Values.Lifecycle }}
+        lifecycle:
+            {{ if .Values.Lifecycle.PreStopCommand }}
+            preStop:
+              exec:
+                command:
+                - /bin/sh
+                - -c
+                - |
+                  {{ .Values.Lifecycle.PreStopCommand }}
+            {{ end }}
+            {{ if.Values.Lifecycle.PostStartCommand }}
+            postStart:
+              exec:
+                command:
+                - /bin/sh
+                - -c
+                - |
+                  {{ .Values.Lifecycle.PostStartCommand }}
+            {{ end }}
+        {{ end }}
+        {{ if .Values.Envs | or .Files }}
+        env:
+          - name: branch
+            value: "{{ .Values.Branch }}"
+          {{- if .Values.Envs }}
+           {{- range $Env := .Values.Envs }}
+          - name: "{{ $Env.name }}"
+            {{- if $Env.value }}
+            value: "{{ $Env.value }}"
+            {{- end }}
+            {{- if $Env.valueFrom }}
+            valueFrom: 
+            {{- $Env.valueFrom | nindent 14}}
+            {{- end }}
+           {{- end }}
+          {{- end }}          
+          {{- if .Files }}
+            {{- $files := .Files }}
+            {{- $files.Get "env_variables.yaml" | nindent 10}}
+          {{- end }}
+          {{- if .Values.Postgres }}
+          - name: PG_HOST
+            value: "{{ .Release.Name }}-psql"
+          - name: PG_PORT
+            value: "5432"
+          - name: PG_DATABASE
+            value: {{ .Values.AppComponent | replace "-" "" }}
+          - name: PG_USER
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.AppComponent | replace "-" "" }}.{{ .Release.Name }}-psql.credentials.postgresql.acid.zalan.do
+                key: username
+          - name: PG_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.AppComponent | replace "-" "" }}.{{ .Release.Name }}-psql.credentials.postgresql.acid.zalan.do
+                key: password
+          {{- end }}
+          {{- if .Values.Kafka }}
+          - name: KAFKA_HOST
+            value: platform-kafka-bootstrap.kafka-operator
+          - name: KAFKA_PORT
+            value: "9092"
+          - name: KAFKA_TOPICS
+            value: {{ .Values.Branch }}
+          - name: KAFKA_TOPIC_CM
+            value: {{ .Values.Branch }}-cm
+          - name: KAFKA_TOPIC_PM
+            value: {{ .Values.Branch }}-pm
+          - name: KAFKA_TOPIC_DM
+            value: {{ .Values.Branch }}-dm
+          {{- end }}
+          {{- if .Values.Vault }}
+          - name: VAULT_ADDR
+            value: "https://vault-0.my-vault:8200"
+          - name: VAULT_CACERT
+            value: "/etc/ssl/ca.crt"
+          {{- end }}
+        {{- end }}
+        {{ if .Values.Volumes }}
+        volumeMounts:
+          {{ range $Volume := .Values.Volumes }}
+          - mountPath: {{ $Volume.MountPath}}
+            name: {{ $Volume.Name}}
+           {{ if $Volume.SubPath }}
+            subPath: {{ $Volume.SubPath }}
+           {{ end }}
+          {{ end }}
+        {{ end }}
+        resources:
+            limits:
+                memory: {{ .Values.LimitMemory | default "256Mi" }}
+                cpu: {{ .Values.LimitCpu | default "0.5" }}
+            requests: 
+                memory: {{ .Values.RequestMemory | default "128Mi" }}
+                cpu: {{ .Values.RequestCpu | default "0.1" }}
+      {{ if .Values.Volumes }}            
+      volumes:
+          {{ range $Volume := .Values.Volumes }}
+          - name: {{ $Volume.Name}}
+          {{ $Volume.VolumeConfig | nindent 12 }}
+          {{ end }}
+      {{ end }}
+{{ end }}
+

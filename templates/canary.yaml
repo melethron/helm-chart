@@ -1,0 +1,82 @@
+{{ if .Values.Service | default true }}
+apiVersion: flagger.app/v1beta1
+kind: Canary
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  targetRef:
+    {{ if .Values.AppType | eq "Deployment" | or "DaemonSet" }}
+    apiVersion: apps/v1
+    kind: {{ .Values.AppType}}
+    name: {{ .Release.Name }}
+  {{ if .Values.HPA | default true}}
+  autoscalerRef:
+    apiVersion: autoscaling/v2beta1
+    kind: HorizontalPodAutoscaler
+    name: {{ .Release.Name }}
+  {{ end }}
+    {{ end }}
+  progressDeadlineSeconds: {{ .Values.ServiceProgressDeadlineSeconds | default 60}}
+  service:
+    port: 80
+    targetPort: {{ .Values.ServiceAppPort | default 80 }}
+   {{ if .Values.ServiceGateway }}
+    gateways:
+    - {{ .Values.ServiceGateway}}
+    hosts:
+    - mltrn.rocks
+    match:
+      - uri:
+          prefix: {{ .Values.ServiceURI | default "/" }}
+   {{ end }}
+    trafficPolicy:
+      tls:
+        mode: DISABLE
+    retries:
+      attempts: 3
+      perTryTimeout: 1s
+      retryOn: "gateway-error,connect-failure,refused-stream"
+  # BlueGreen block
+  {{ if .Values.DeploymentType | default "BlueGreen" | eq "BlueGreen"}} 
+  provider: istio
+  analysis:
+    interval: 1m
+    threshold: 5
+    iterations: 1
+  {{ else }}
+  # Canary block
+  analysis:
+    interval: 1m
+    threshold: 5
+    maxWeight: 50
+    stepWeight: 10
+  {{ end }}
+    metrics:
+    - name: request-success-rate
+      thresholdRange:
+        min: 99
+      interval: 1m
+    - name: request-duration
+      thresholdRange:
+        max: 500
+      interval: 30s
+      webhooks:
+      {{- if .Values.CustomTest | default false}}
+      {{ range $Test := .Values.CustomTest }}
+      - name: {{ $Test.Name }}
+        type: {{ $Test.Rollout}}
+        url: http://flagger-loadtester.test/
+        timeout: 5s
+        metadata:
+          cmd: {{ $Test.Cmd }} http://{{ .Release.Name }}-canary.{{ .Release.Namespace }}{{ .Values.WebhookURL | default "/" }}"
+      {{  end }}
+      {{ else }}
+      - name: load-test
+        type: pre-rollout
+        url: http://flagger-loadtester.test/
+        timeout: 5s
+        metadata:
+          type: cmd
+          cmd: "hey -z 1m -q 10 -c 2 http://{{ .Release.Name }}-canary.{{ .Release.Namespace }}{{ .Values.WebhookURL | default "/" }}"
+      {{ end }}
+{{ end }}

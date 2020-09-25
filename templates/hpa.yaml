@@ -1,0 +1,24 @@
+{{ if .Values.AppType | eq "Deployment" }}
+{{ if .Values.HPA | default true}}
+apiVersion: autoscaling/v2beta1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: podinfo
+spec:
+  maxReplicas: {{ .Values.HPAMaxReplicas | default 5}}
+  minReplicas: {{ .Values.HPAMinReplicas | default 2}}
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      targetAverageUtilization: {{ .Values.HPACpuUtilization | default 75}}
+  - type: Resource
+    resource:
+      name: memory
+      targetAverageUtilization: {{ .Values.HPAMemoryUtilization | default 75}}
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: podinfo
+{{ end }}
+{{ end }}

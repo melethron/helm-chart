@@ -1,0 +1,7 @@
+AppType: "DaemonSet"
+DeploymentType: Canary
+ServiceGateway: public-gateway.istio-system.svc.cluster.local
+ServiceAppPort: 9898
+Domain: mltrn.rocks
+AppComponent: front
+AppGroup: front
